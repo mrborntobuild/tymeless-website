@@ -1,0 +1,7 @@
+{
+  "name": "Cradle - Legacy Preservation",
+  "description": "A digital sanctuary to preserve the stories, voices, and personalities of loved ones using AI.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

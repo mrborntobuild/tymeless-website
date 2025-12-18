@@ -116,10 +116,20 @@ const App: React.FC = () => {
         // If DB returns empty, keep using INITIAL_PERSONAS
       } catch (error) {
         console.error('Error loading personas from database:', error);
-        // On error, keep using INITIAL_PERSONAS as fallback
+        // Silently fall back to INITIAL_PERSONAS - don't break the app
+        setPersonas(INITIAL_PERSONAS);
       }
     };
-    loadPersonas();
+    
+    // Add a timeout to prevent hanging
+    const timeoutId = setTimeout(() => {
+      console.warn('Persona loading timed out, using fallback data');
+      setPersonas(INITIAL_PERSONAS);
+    }, 5000);
+    
+    loadPersonas().finally(() => {
+      clearTimeout(timeoutId);
+    });
   }, []);
 
   const handleCreateNew = (newPersona: LegacyPersona) => {

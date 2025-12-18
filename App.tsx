@@ -10,7 +10,7 @@ import { Footer } from './components/Footer';
 import AuthPage from './components/AuthPage';
 import Dashboard from './components/Dashboard';
 import Logo from './components/Logo';
-import { Search, Plus, PlayCircle, X, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
+import { Search, Plus, X, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
 import { getPersonas } from './services/database/personaService';
 
 // Mock Data to populate the carousel initially
@@ -191,12 +191,28 @@ const App: React.FC = () => {
     <div className="min-h-screen font-sans text-cradle-text bg-[#FDFCF8] overflow-x-hidden">
       
       {/* Navigation */}
-      <nav className="flex items-center justify-center px-6 py-5 md:px-12 fixed top-0 left-0 right-0 z-50 bg-[#FDFCF8]/90 backdrop-blur-sm border-b border-transparent transition-all duration-300">
+      <nav className="flex items-center justify-between px-6 py-5 md:px-12 fixed top-0 left-0 right-0 z-50 bg-[#FDFCF8]/90 backdrop-blur-sm border-b border-transparent transition-all duration-300">
         {/* Logo */}
         <Logo 
           className="cursor-pointer" 
           onClick={() => setView('landing')}
         />
+        
+        {/* Sign Up / Sign In Buttons */}
+        <div className="flex items-center gap-2 md:gap-3">
+          <button
+            onClick={() => setView('auth')}
+            className="text-sm md:text-base text-cradle-text hover:text-cradle-brand transition-colors font-medium"
+          >
+            Sign In
+          </button>
+          <button
+            onClick={() => setView('auth')}
+            className="px-4 py-2 md:px-6 md:py-2.5 bg-cradle-brand text-white rounded-lg md:rounded-xl font-medium text-sm md:text-base hover:bg-black transition-colors shadow-sm"
+          >
+            Sign Up
+          </button>
+        </div>
       </nav>
 
       {/* Main Content */}
@@ -224,12 +240,6 @@ const App: React.FC = () => {
               className="px-8 py-4 bg-cradle-brand text-white rounded-xl font-medium text-lg hover:bg-black transition shadow-lg shadow-cradle-brand/25 hover:shadow-xl w-full sm:w-auto"
             >
               Start Preserving
-            </button>
-            <button 
-              onClick={() => setIsVideoOpen(true)}
-              className="px-8 py-4 bg-white border border-gray-200 text-cradle-text rounded-xl font-medium text-lg hover:bg-gray-50 transition w-full sm:w-auto flex items-center justify-center gap-2"
-            >
-              <PlayCircle size={20} className="text-cradle-brand" /> How it Works
             </button>
           </div>
         </div>

@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+@theme {
+  --color-cradle-bg: #FDFCF8;
+  --color-cradle-text: #2A2420;
+  --color-cradle-accent: #8C7B70;
+  --color-cradle-card: #F4F1EA;
+  --color-cradle-warm: #E8E1D5;
+  --color-cradle-btn: #3E342F;
+  --color-cradle-brand: #D97757;
+}
+
 body {
   background-color: #FDFCF8;
   color: #2A2420;

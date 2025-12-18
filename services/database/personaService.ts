@@ -2,6 +2,15 @@ import { supabase } from './supabaseClient';
 import { LegacyPersona } from '../../types';
 
 export const getPersonas = async (): Promise<LegacyPersona[]> => {
+  // Check if Supabase is configured
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  
+  if (!supabaseUrl || !supabaseAnonKey || supabaseUrl === 'https://placeholder.supabase.co') {
+    console.warn('Supabase not configured, using fallback data');
+    return [];
+  }
+
   try {
     const { data, error } = await supabase
       .from('website_personas')

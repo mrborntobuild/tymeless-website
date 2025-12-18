@@ -10,7 +10,7 @@ import { Footer } from './components/Footer';
 import AuthPage from './components/AuthPage';
 import Dashboard from './components/Dashboard';
 import Logo from './components/Logo';
-import { Search, Plus, PlayCircle, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Plus, PlayCircle, X, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
 import { getPersonas } from './services/database/personaService';
 
 // Mock Data to populate the carousel initially
@@ -81,7 +81,7 @@ const INITIAL_PERSONAS: LegacyPersona[] = [
   }
 ];
 
-type ViewState = 'landing' | 'auth' | 'dashboard';
+type ViewState = 'landing' | 'auth' | 'dashboard' | 'chat';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>('landing');
@@ -89,6 +89,18 @@ const App: React.FC = () => {
   const [isPreserving, setIsPreserving] = useState(false);
   const [isVideoOpen, setIsVideoOpen] = useState(false);
   const [personas, setPersonas] = useState<LegacyPersona[]>(INITIAL_PERSONAS);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile on mount and resize
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768); // md breakpoint in Tailwind
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Load personas from database on mount
   useEffect(() => {
@@ -135,7 +147,18 @@ const App: React.FC = () => {
   const handleCreateNew = (newPersona: LegacyPersona) => {
     setPersonas([newPersona, ...personas]);
     setIsPreserving(false);
-    setActivePersona(newPersona); // Open chat immediately
+    setActivePersona(newPersona);
+    if (isMobile) {
+      setView('chat');
+    }
+  };
+
+  const handlePersonaClick = (persona: LegacyPersona) => {
+    setActivePersona(persona);
+    if (isMobile) {
+      setView('chat'); // Navigate to full page on mobile
+    }
+    // On desktop, activePersona state will trigger modal
   };
 
   // View Routing
@@ -145,6 +168,22 @@ const App: React.FC = () => {
 
   if (view === 'dashboard') {
     return <Dashboard onLogout={() => setView('landing')} />;
+  }
+
+  // Chat View (Mobile Full Page)
+  if (view === 'chat' && activePersona) {
+    return (
+      <div className="min-h-screen font-sans text-cradle-text bg-[#FDFCF8]">
+        <ChatInterface 
+          persona={activePersona} 
+          onClose={() => {
+            setActivePersona(null);
+            setView('landing');
+          }}
+          fullPage={true}
+        />
+      </div>
+    );
   }
 
   // Landing View
@@ -218,7 +257,7 @@ const App: React.FC = () => {
                  <LegacyCard 
                    key={persona.id} 
                    persona={persona} 
-                   onClick={setActivePersona}
+                   onClick={handlePersonaClick}
                  />
                ))}
                
@@ -252,11 +291,12 @@ const App: React.FC = () => {
       <Footer />
 
 
-      {/* Modals */}
-      {activePersona && (
+      {/* Modals - Desktop only */}
+      {activePersona && !isMobile && (
         <ChatInterface 
           persona={activePersona} 
           onClose={() => setActivePersona(null)} 
+          fullPage={false}
         />
       )}
 

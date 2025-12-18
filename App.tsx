@@ -201,13 +201,13 @@ const App: React.FC = () => {
         {/* Sign Up / Sign In Buttons */}
         <div className="flex items-center gap-2 md:gap-3">
           <button
-            onClick={() => setView('auth')}
+            onClick={() => window.open('https://app.tymeless.ai', '_blank')}
             className="text-sm md:text-base text-cradle-text hover:text-cradle-brand transition-colors font-medium"
           >
             Sign In
           </button>
           <button
-            onClick={() => setView('auth')}
+            onClick={() => window.open('https://app.tymeless.ai', '_blank')}
             className="px-4 py-2 md:px-6 md:py-2.5 bg-cradle-brand text-white rounded-lg md:rounded-xl font-medium text-sm md:text-base hover:bg-black transition-colors shadow-sm"
           >
             Sign Up

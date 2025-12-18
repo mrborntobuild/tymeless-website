@@ -9,7 +9,8 @@ import { CallToAction } from './components/CallToAction';
 import { Footer } from './components/Footer';
 import AuthPage from './components/AuthPage';
 import Dashboard from './components/Dashboard';
-import { Menu, Search, Plus, PlayCircle, X } from 'lucide-react';
+import Logo from './components/Logo';
+import { Search, Plus, PlayCircle, X, ChevronLeft, ChevronRight } from 'lucide-react';
 
 // Mock Data to populate the carousel initially
 const INITIAL_PERSONAS: LegacyPersona[] = [
@@ -84,37 +85,12 @@ const App: React.FC = () => {
     <div className="min-h-screen font-sans text-cradle-text bg-[#FDFCF8] overflow-x-hidden">
       
       {/* Navigation */}
-      <nav className="flex items-center justify-between px-6 py-5 md:px-12 fixed top-0 left-0 right-0 z-50 bg-[#FDFCF8]/90 backdrop-blur-sm border-b border-transparent transition-all duration-300">
-        <div className="flex items-center gap-8">
-          <button className="flex items-center gap-2 text-sm font-medium opacity-60 hover:opacity-100">
-            Menu <Menu size={16} />
-          </button>
-        </div>
-        
-        {/* Logo - Abstract butterfly/hourglass shape mimic */}
-        <div className="absolute left-1/2 transform -translate-x-1/2 cursor-pointer" onClick={() => setView('landing')}>
-           <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M10 10C10 10 20 20 10 30" stroke="#D97757" strokeWidth="2.5" strokeLinecap="round"/>
-              <path d="M30 10C30 10 20 20 30 30" stroke="#D97757" strokeWidth="2.5" strokeLinecap="round"/>
-              <circle cx="20" cy="20" r="3" fill="#D97757"/>
-           </svg>
-        </div>
-
-        <div className="flex items-center gap-6">
-          <button className="hidden md:block text-sm font-medium hover:text-cradle-brand transition">Archive</button>
-          <button 
-            onClick={() => setView('auth')}
-            className="hidden md:block text-sm font-medium hover:text-cradle-brand transition"
-          >
-            Sign in
-          </button>
-          <button 
-            onClick={() => setIsPreserving(true)}
-            className="bg-cradle-brand hover:bg-black transition-colors px-6 py-3 rounded-full text-sm font-semibold text-white shadow-md shadow-cradle-brand/20"
-          >
-            Start Preservation
-          </button>
-        </div>
+      <nav className="flex items-center justify-center px-6 py-5 md:px-12 fixed top-0 left-0 right-0 z-50 bg-[#FDFCF8]/90 backdrop-blur-sm border-b border-transparent transition-all duration-300">
+        {/* Logo */}
+        <Logo 
+          className="cursor-pointer" 
+          onClick={() => setView('landing')}
+        />
       </nav>
 
       {/* Main Content */}
@@ -138,7 +114,7 @@ const App: React.FC = () => {
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <button 
-              onClick={() => setIsPreserving(true)}
+              onClick={() => window.open('https://app.tymeless.ai', '_blank')}
               className="px-8 py-4 bg-cradle-brand text-white rounded-xl font-medium text-lg hover:bg-black transition shadow-lg shadow-cradle-brand/25 hover:shadow-xl w-full sm:w-auto"
             >
               Start Preserving
@@ -153,28 +129,44 @@ const App: React.FC = () => {
         </div>
 
         {/* Carousel / Grid */}
-        <div className="px-4 md:px-8 overflow-x-hidden mb-24">
-          {/* Scroll container */}
-          <div className="flex gap-6 overflow-x-auto pb-12 px-4 md:px-12 no-scrollbar snap-x">
-             {personas.map((persona) => (
-               <LegacyCard 
-                 key={persona.id} 
-                 persona={persona} 
-                 onClick={setActivePersona}
-               />
-             ))}
-             
-             {/* Add New Card (Visual placeholder for action) */}
-             <div 
-               onClick={() => setIsPreserving(true)}
-               className="group relative h-[420px] w-full md:w-[340px] flex-shrink-0 rounded-2xl border-2 border-dashed border-cradle-text/10 flex flex-col items-center justify-center cursor-pointer hover:bg-white hover:border-cradle-brand/30 transition-all"
-             >
-                <div className="w-16 h-16 rounded-full bg-cradle-brand/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <Plus size={32} className="text-cradle-brand" />
-                </div>
-                <h3 className="text-xl font-serif text-cradle-text">Add Loved One</h3>
-                <p className="text-sm text-cradle-text/50 mt-2">Begin the journey</p>
-             </div>
+        <div className="px-4 md:px-8 overflow-x-hidden mb-24 relative">
+          {/* Scroll hint for mobile */}
+          <div className="md:hidden absolute top-0 right-4 z-10 bg-cradle-bg/80 backdrop-blur-sm px-3 py-1.5 rounded-full text-xs text-cradle-text/60 flex items-center gap-1.5">
+            <ChevronLeft size={14} />
+            <span>Swipe</span>
+            <ChevronRight size={14} />
+          </div>
+          
+          {/* Scroll container with fade gradients */}
+          <div className="relative">
+            {/* Left fade gradient - mobile only */}
+            <div className="md:hidden absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-cradle-bg to-transparent pointer-events-none z-10"></div>
+            
+            {/* Right fade gradient - mobile only */}
+            <div className="md:hidden absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-cradle-bg to-transparent pointer-events-none z-10"></div>
+            
+            {/* Scroll container */}
+            <div className="flex gap-6 overflow-x-auto pb-12 px-4 md:px-12 no-scrollbar snap-x">
+               {personas.map((persona) => (
+                 <LegacyCard 
+                   key={persona.id} 
+                   persona={persona} 
+                   onClick={setActivePersona}
+                 />
+               ))}
+               
+               {/* Add New Card (Visual placeholder for action) */}
+               <div 
+                 onClick={() => window.open('https://app.tymeless.ai', '_blank')}
+                 className="group relative h-[420px] w-full md:w-[340px] flex-shrink-0 rounded-2xl border-2 border-dashed border-cradle-text/10 flex flex-col items-center justify-center cursor-pointer hover:bg-white hover:border-cradle-brand/30 transition-all"
+               >
+                  <div className="w-16 h-16 rounded-full bg-cradle-brand/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <Plus size={32} className="text-cradle-brand" />
+                  </div>
+                  <h3 className="text-xl font-serif text-cradle-text">Add Loved One</h3>
+                  <p className="text-sm text-cradle-text/50 mt-2">Begin the journey</p>
+               </div>
+            </div>
           </div>
         </div>
 
@@ -191,6 +183,7 @@ const App: React.FC = () => {
 
       {/* Footer */}
       <Footer />
+
 
       {/* Modals */}
       {activePersona && (

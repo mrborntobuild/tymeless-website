@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LegacyPersona, ChatMessage } from '../types';
-import { createPersonaChat } from '../services/geminiService';
+// Switch between OpenAI and Gemini by changing this import
+import { streamPersonaResponse, generateFollowUpQuestions } from '../services/openaiService';
+// import { streamPersonaResponse } from '../services/geminiService';
+import { getOrCreateConversation, saveMessage, getConversationMessages } from '../services/database/websiteChatService';
 import { X, Send, Mic, Sparkles } from 'lucide-react';
-import { Chat } from '@google/genai';
 
 interface ChatInterfaceProps {
   persona: LegacyPersona;
@@ -13,14 +15,63 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ persona, onClose }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const chatSessionRef = useRef<Chat | null>(null);
+  const [streamingText, setStreamingText] = useState('');
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [initializing, setInitializing] = useState(true);
+  const [followUpQuestions, setFollowUpQuestions] = useState<string[]>([]);
+  const [generatingQuestions, setGeneratingQuestions] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Generate or retrieve session ID
+  const getSessionId = (): string => {
+    let sessionId = sessionStorage.getItem(`chat_session_${persona.id}`);
+    if (!sessionId) {
+      sessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      sessionStorage.setItem(`chat_session_${persona.id}`, sessionId);
+    }
+    return sessionId;
+  };
+  
+  const sessionIdRef = useRef<string>(getSessionId());
+
+  // Initialize conversation and load history
   useEffect(() => {
-    // Initialize Chat
-    chatSessionRef.current = createPersonaChat(persona);
-    
-    // Initial greeting
+    const initConversation = async () => {
+      try {
+        setInitializing(true);
+        const conv = await getOrCreateConversation(persona.id, sessionIdRef.current);
+        setConversationId(conv.id);
+        
+        // Load previous messages
+        const previousMessages = await getConversationMessages(conv.id);
+        if (previousMessages.length > 0) {
+          const formattedMessages = previousMessages.map(msg => ({
+            id: msg.id,
+            role: msg.role as 'user' | 'model',
+            text: msg.text_content || '',
+            timestamp: new Date(msg.created_at)
+          }));
+          setMessages(formattedMessages);
+        } else {
+          // Only show greeting if no previous messages
+          const initialGreeting: ChatMessage = {
+            id: 'init',
+            role: 'model',
+            text: `Hello, sweetheart. I'm here. What's on your mind today?`,
+            timestamp: new Date()
+          };
+          setMessages([initialGreeting]);
+          setFollowUpQuestions([]); // Reset to show initial sample questions
+        }
+      } catch (error) {
+        console.error('Error loading conversation:', error);
+        // Fallback: create a temporary conversation ID so chat can still work
+        // This allows the user to chat even if database is unavailable
+        const tempConversationId = `temp-${Date.now()}`;
+        setConversationId(tempConversationId);
+        console.warn('Using temporary conversation ID due to error:', tempConversationId);
+        
+        // Fallback to greeting if error
     const initialGreeting: ChatMessage = {
       id: 'init',
       role: 'model',
@@ -28,6 +79,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ persona, onClose }) => {
       timestamp: new Date()
     };
     setMessages([initialGreeting]);
+        setFollowUpQuestions([]); // Reset to show initial sample questions
+      } finally {
+        setInitializing(false);
+      }
+    };
+    
+    initConversation();
   }, [persona]);
 
   const scrollToBottom = () => {
@@ -36,10 +94,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ persona, onClose }) => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, streamingText]);
 
   const handleSend = async () => {
-    if (!input.trim() || !chatSessionRef.current) return;
+    if (!input.trim() || !conversationId) {
+      console.log('Cannot send:', { hasInput: !!input.trim(), conversationId, initializing });
+      return;
+    }
 
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
@@ -48,21 +109,77 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ persona, onClose }) => {
       timestamp: new Date()
     };
 
+    // Save user message to database (async, don't wait)
+    // Only save if conversationId doesn't start with 'temp-'
+    if (!conversationId.startsWith('temp-')) {
+      saveMessage(conversationId, persona.id, sessionIdRef.current, {
+        role: 'user',
+        text_content: input
+      }).catch(console.error);
+    }
+
     setMessages(prev => [...prev, userMsg]);
+    const userInput = input;
     setInput('');
     setLoading(true);
+    setStreamingText('');
 
     try {
-      const result = await chatSessionRef.current.sendMessage({ message: userMsg.text });
+      let fullResponse = '';
+      
+      // Stream the response
+      for await (const chunk of streamPersonaResponse(persona, userInput)) {
+        fullResponse += chunk;
+        setStreamingText(fullResponse);
+      }
+
+      // Save AI response to database (async)
+      // Only save if conversationId doesn't start with 'temp-'
+      if (!conversationId.startsWith('temp-')) {
+        saveMessage(conversationId, persona.id, sessionIdRef.current, {
+          role: 'model',
+          text_content: fullResponse
+        }).catch(console.error);
+      }
+
       const modelMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'model',
-        text: result.text || "I'm having a little trouble remembering right now...",
+        text: fullResponse,
         timestamp: new Date()
       };
+      
       setMessages(prev => [...prev, modelMsg]);
+      setStreamingText('');
+      
+      // Generate follow-up questions based on response
+      setGeneratingQuestions(true);
+      try {
+        const questions = await generateFollowUpQuestions(
+          persona.name,
+          fullResponse,
+          [...messages, userMsg, modelMsg].map(m => ({
+            role: m.role,
+            content: m.text
+          }))
+        );
+        setFollowUpQuestions(questions);
+      } catch (err) {
+        console.error('Error generating follow-up questions:', err);
+        // Use default sample questions as fallback
+        setFollowUpQuestions(persona.sampleQuestions?.slice(0, 5) || []);
+      } finally {
+        setGeneratingQuestions(false);
+      }
     } catch (err) {
       console.error(err);
+      const errorMsg: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'model',
+        text: "I'm having a little trouble remembering right now. Could you try again?",
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMsg]);
     } finally {
       setLoading(false);
     }
@@ -105,14 +222,227 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ persona, onClose }) => {
 
            {/* Messages */}
            <div className="flex-1 overflow-y-auto p-6 md:p-10 space-y-8">
-              {messages.map((msg) => (
-                <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              {messages.map((msg, index) => (
+                <React.Fragment key={msg.id}>
+                  <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[80%] ${msg.role === 'user' ? 'bg-cradle-brand text-white' : 'bg-cradle-card text-cradle-text'} px-6 py-4 rounded-2xl text-lg font-light leading-relaxed shadow-sm`}>
                      {msg.text}
                   </div>
                 </div>
+                  
+                  {/* Show BOTH sample questions AND follow-up questions after each AI response */}
+                  {msg.role === 'model' && !loading && !streamingText && index === messages.length - 1 && (
+                    <div className="space-y-3 px-2">
+                      {/* Original Sample Questions */}
+                      {persona.sampleQuestions && persona.sampleQuestions.length > 0 && (
+                        <div>
+                          <p className="text-xs text-gray-400 mb-2">Suggested questions:</p>
+                          <div className="flex flex-wrap gap-2">
+                            {persona.sampleQuestions.slice(0, 5).map((question, qIdx) => (
+                              <button
+                                key={`sample-${qIdx}`}
+                                onClick={async () => {
+                                  if (!conversationId || initializing || loading) return;
+                                  
+                                  const userMsg: ChatMessage = {
+                                    id: Date.now().toString(),
+                                    role: 'user',
+                                    text: question,
+                                    timestamp: new Date()
+                                  };
+
+                                  if (!conversationId.startsWith('temp-')) {
+                                    saveMessage(conversationId, persona.id, sessionIdRef.current, {
+                                      role: 'user',
+                                      text_content: question
+                                    }).catch(console.error);
+                                  }
+
+                                  setMessages(prev => [...prev, userMsg]);
+                                  setLoading(true);
+                                  setStreamingText('');
+
+                                  try {
+                                    let fullResponse = '';
+                                    
+                                    for await (const chunk of streamPersonaResponse(persona, question)) {
+                                      fullResponse += chunk;
+                                      setStreamingText(fullResponse);
+                                    }
+
+                                    if (!conversationId.startsWith('temp-')) {
+                                      saveMessage(conversationId, persona.id, sessionIdRef.current, {
+                                        role: 'model',
+                                        text_content: fullResponse
+                                      }).catch(console.error);
+                                    }
+
+                                    const modelMsg: ChatMessage = {
+                                      id: (Date.now() + 1).toString(),
+                                      role: 'model',
+                                      text: fullResponse,
+                                      timestamp: new Date()
+                                    };
+                                    
+                                    setMessages(prev => [...prev, modelMsg]);
+                                    setStreamingText('');
+                                    
+                                    // Generate follow-up questions
+                                    setGeneratingQuestions(true);
+                                    try {
+                                      const questions = await generateFollowUpQuestions(
+                                        persona.name,
+                                        fullResponse,
+                                        [...messages, userMsg, modelMsg].map(m => ({
+                                          role: m.role,
+                                          content: m.text
+                                        }))
+                                      );
+                                      setFollowUpQuestions(questions);
+                                    } catch (err) {
+                                      console.error('Error generating follow-up questions:', err);
+                                      setFollowUpQuestions(persona.sampleQuestions?.slice(0, 5) || []);
+                                    } finally {
+                                      setGeneratingQuestions(false);
+                                    }
+                                  } catch (err) {
+                                    console.error(err);
+                                    const errorMsg: ChatMessage = {
+                                      id: (Date.now() + 1).toString(),
+                                      role: 'model',
+                                      text: "I'm having a little trouble remembering right now. Could you try again?",
+                                      timestamp: new Date()
+                                    };
+                                    setMessages(prev => [...prev, errorMsg]);
+                                  } finally {
+                                    setLoading(false);
+                                  }
+                                }}
+                                disabled={!conversationId || initializing || loading}
+                                className="px-3 py-1.5 bg-white hover:bg-cradle-brand hover:text-white text-cradle-text rounded-full text-xs font-light transition-colors border border-gray-300 hover:border-transparent disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                              >
+                                {question}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Follow-up Questions (Generated based on response) */}
+                      {generatingQuestions ? (
+                        <div>
+                          <p className="text-xs text-gray-400 mb-2">Follow-up questions:</p>
+                          <div className="text-xs text-gray-400 px-2">Generating questions...</div>
+                        </div>
+                      ) : followUpQuestions.length > 0 ? (
+                        <div>
+                          <p className="text-xs text-gray-400 mb-2">Follow-up questions:</p>
+                          <div className="flex flex-wrap gap-2">
+                            {followUpQuestions.slice(0, 5).map((question, qIdx) => (
+                              <button
+                                key={`followup-${qIdx}`}
+                                onClick={async () => {
+                                  if (!conversationId || initializing || loading) return;
+                                  
+                                  const userMsg: ChatMessage = {
+                                    id: Date.now().toString(),
+                                    role: 'user',
+                                    text: question,
+                                    timestamp: new Date()
+                                  };
+
+                                  if (!conversationId.startsWith('temp-')) {
+                                    saveMessage(conversationId, persona.id, sessionIdRef.current, {
+                                      role: 'user',
+                                      text_content: question
+                                    }).catch(console.error);
+                                  }
+
+                                  setMessages(prev => [...prev, userMsg]);
+                                  setLoading(true);
+                                  setStreamingText('');
+
+                                  try {
+                                    let fullResponse = '';
+                                    
+                                    for await (const chunk of streamPersonaResponse(persona, question)) {
+                                      fullResponse += chunk;
+                                      setStreamingText(fullResponse);
+                                    }
+
+                                    if (!conversationId.startsWith('temp-')) {
+                                      saveMessage(conversationId, persona.id, sessionIdRef.current, {
+                                        role: 'model',
+                                        text_content: fullResponse
+                                      }).catch(console.error);
+                                    }
+
+                                    const modelMsg: ChatMessage = {
+                                      id: (Date.now() + 1).toString(),
+                                      role: 'model',
+                                      text: fullResponse,
+                                      timestamp: new Date()
+                                    };
+                                    
+                                    setMessages(prev => [...prev, modelMsg]);
+                                    setStreamingText('');
+                                    
+                                    // Generate new follow-up questions
+                                    setGeneratingQuestions(true);
+                                    try {
+                                      const questions = await generateFollowUpQuestions(
+                                        persona.name,
+                                        fullResponse,
+                                        [...messages, userMsg, modelMsg].map(m => ({
+                                          role: m.role,
+                                          content: m.text
+                                        }))
+                                      );
+                                      setFollowUpQuestions(questions);
+                                    } catch (err) {
+                                      console.error('Error generating follow-up questions:', err);
+                                      setFollowUpQuestions(persona.sampleQuestions?.slice(0, 5) || []);
+                                    } finally {
+                                      setGeneratingQuestions(false);
+                                    }
+                                  } catch (err) {
+                                    console.error(err);
+                                    const errorMsg: ChatMessage = {
+                                      id: (Date.now() + 1).toString(),
+                                      role: 'model',
+                                      text: "I'm having a little trouble remembering right now. Could you try again?",
+                                      timestamp: new Date()
+                                    };
+                                    setMessages(prev => [...prev, errorMsg]);
+                                  } finally {
+                                    setLoading(false);
+                                  }
+                                }}
+                                disabled={!conversationId || initializing || loading}
+                                className="px-3 py-1.5 bg-cradle-brand/10 hover:bg-cradle-brand hover:text-white text-cradle-text rounded-full text-xs font-light transition-colors border border-cradle-brand/30 hover:border-transparent disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                              >
+                                {question}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </React.Fragment>
               ))}
-              {loading && (
+              
+              {/* Show streaming text */}
+              {streamingText && (
+                <div className="flex justify-start">
+                  <div className="bg-cradle-card px-6 py-4 rounded-2xl text-lg font-light leading-relaxed shadow-sm">
+                    {streamingText}
+                    <span className="animate-pulse">▋</span>
+                  </div>
+                </div>
+              )}
+              
+              {loading && !streamingText && (
                 <div className="flex justify-start">
                    <div className="bg-cradle-card px-6 py-4 rounded-2xl flex gap-2 items-center">
                      <span className="w-2 h-2 bg-cradle-text/40 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
@@ -126,6 +456,91 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ persona, onClose }) => {
 
            {/* Input */}
            <div className="p-6 md:p-8 bg-white border-t border-gray-50">
+             {/* Debug info - remove in production */}
+             {process.env.NODE_ENV === 'development' && (
+               <div className="text-xs text-gray-400 mb-2">
+                 Debug: input={input.length > 0 ? 'yes' : 'no'}, 
+                 conversationId={conversationId ? 'yes' : 'no'}, 
+                 initializing={initializing ? 'yes' : 'no'}, 
+                 loading={loading ? 'yes' : 'no'}
+               </div>
+             )}
+             
+             {/* Sample Questions - Show when input is empty and not loading */}
+             {!input.trim() && !loading && !streamingText && conversationId && !initializing && persona.sampleQuestions && persona.sampleQuestions.length > 0 && (
+               <div className="mb-4">
+                 <div className="flex flex-wrap gap-2 justify-center">
+                   {persona.sampleQuestions.slice(0, 5).map((question, idx) => (
+                     <button
+                       key={idx}
+                       onClick={async () => {
+                         if (!conversationId || initializing || loading) return;
+                         
+                         const userMsg: ChatMessage = {
+                           id: Date.now().toString(),
+                           role: 'user',
+                           text: question,
+                           timestamp: new Date()
+                         };
+
+                         if (!conversationId.startsWith('temp-')) {
+                           saveMessage(conversationId, persona.id, sessionIdRef.current, {
+                             role: 'user',
+                             text_content: question
+                           }).catch(console.error);
+                         }
+
+                         setMessages(prev => [...prev, userMsg]);
+                         setLoading(true);
+                         setStreamingText('');
+
+                         try {
+                           let fullResponse = '';
+                           
+                           for await (const chunk of streamPersonaResponse(persona, question)) {
+                             fullResponse += chunk;
+                             setStreamingText(fullResponse);
+                           }
+
+                           if (!conversationId.startsWith('temp-')) {
+                             saveMessage(conversationId, persona.id, sessionIdRef.current, {
+                               role: 'model',
+                               text_content: fullResponse
+                             }).catch(console.error);
+                           }
+
+                           const modelMsg: ChatMessage = {
+                             id: (Date.now() + 1).toString(),
+                             role: 'model',
+                             text: fullResponse,
+                             timestamp: new Date()
+                           };
+                           
+                           setMessages(prev => [...prev, modelMsg]);
+                           setStreamingText('');
+                         } catch (err) {
+                           console.error(err);
+                           const errorMsg: ChatMessage = {
+                             id: (Date.now() + 1).toString(),
+                             role: 'model',
+                             text: "I'm having a little trouble remembering right now. Could you try again?",
+                             timestamp: new Date()
+                           };
+                           setMessages(prev => [...prev, errorMsg]);
+                         } finally {
+                           setLoading(false);
+                         }
+                       }}
+                       disabled={!conversationId || initializing || loading}
+                       className="px-3 py-1.5 bg-cradle-card hover:bg-cradle-brand hover:text-white text-cradle-text rounded-full text-xs font-light transition-colors border border-gray-200 hover:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                     >
+                       {question}
+                     </button>
+                   ))}
+                 </div>
+               </div>
+             )}
+             
              <div className="relative flex items-center bg-cradle-card rounded-full px-2 py-2">
                 <button className="p-3 text-cradle-text/50 hover:text-cradle-brand hover:bg-white rounded-full transition-colors">
                   <Mic size={20} />
@@ -140,15 +555,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ persona, onClose }) => {
                 />
                 <button 
                   onClick={handleSend}
-                  disabled={!input.trim() || loading}
-                  className="p-3 bg-cradle-brand text-white rounded-full hover:bg-black transition-colors disabled:opacity-50"
+                  disabled={!input.trim() || loading || !conversationId || initializing}
+                  className="p-3 bg-cradle-brand text-white rounded-full hover:bg-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={!conversationId || initializing ? "Loading conversation..." : !input.trim() ? "Type a message" : loading ? "Sending..." : "Send message"}
                 >
                   <Send size={20} />
                 </button>
              </div>
              <div className="text-center mt-4">
                <span className="text-xs text-gray-300 flex items-center justify-center gap-1">
-                 <Sparkles size={10} /> Preserved by Cradle AI
+                 <Sparkles size={10} /> Preserved by Tymeless AI
                </span>
              </div>
            </div>

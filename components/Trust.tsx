@@ -57,11 +57,11 @@ export const Trust: React.FC = () => {
         <div className="flex flex-col gap-6">
           <TrustCard 
             title="Built to protect your legacy" 
-            body="Your Cradle maintains integrity over time. Your authenticity stays intact, trusted by your family now—and forever."
+            body="Your Tymeless maintains integrity over time. Your authenticity stays intact, trusted by your family now—and forever."
           />
           <TrustCard 
             title="Privacy first, always" 
-            body="We uphold strict privacy standards. Cradle keeps your conversations private and your stories protected."
+            body="We uphold strict privacy standards. Tymeless keeps your conversations private and your stories protected."
           />
         </div>
 
@@ -92,7 +92,7 @@ export const Trust: React.FC = () => {
           />
            <TrustCard 
             title="You're in control" 
-            body="Your Digital Persona speaks only your words. Cradle never improvises without your consent or context."
+            body="Your Digital Persona speaks only your words. Tymeless never improvises without your consent or context."
           />
         </div>
 

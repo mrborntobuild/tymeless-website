@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { generatePersonalityProfile } from '../services/geminiService';
+// Switch between OpenAI and Gemini by changing this import
+import { generatePersonalityProfile } from '../services/openaiService';
+// import { generatePersonalityProfile } from '../services/geminiService';
 import { LegacyPersona } from '../types';
 import { Loader2, ArrowRight, Heart } from 'lucide-react';
 

@@ -2,6 +2,54 @@ import { GoogleGenAI, Chat } from "@google/genai";
 import { LegacyPersona } from "../types";
 import { findRelevantMemories } from "./embeddings/vectorSearch";
 
+// Helper function to check if questions are too similar (shared with OpenAI service)
+const areQuestionsSimilar = (q1: string, q2: string): boolean => {
+  const normalize = (q: string) => q.toLowerCase().trim().replace(/[^\w\s]/g, '');
+  const n1 = normalize(q1);
+  const n2 = normalize(q2);
+  
+  if (n1.length < 10 || n2.length < 10) return false;
+  
+  const shorter = n1.length < n2.length ? n1 : n2;
+  const longer = n1.length < n2.length ? n2 : n1;
+  
+  return longer.includes(shorter.substring(0, Math.max(10, shorter.length * 0.7)));
+};
+
+// Helper function to parse and validate questions (shared with OpenAI service)
+const parseAndValidateQuestions = (questionsText: string, previousQuestions: string[] = []): string[] => {
+  const questions = questionsText
+    .split(/\n|;|•|[-*]/)
+    .map(q => q.trim())
+    .map(q => {
+      return q
+        .replace(/^(Q\d*[:.]?\s*)/i, '')
+        .replace(/^(Question\s*\d*[:.]?\s*)/i, '')
+        .replace(/^[-*•]\s*/, '')
+        .replace(/^\d+[\.\)]\s*/, '')
+        .trim();
+    })
+    .filter(q => {
+      if (q.length < 10) return false;
+      if (q.length > 150) return false;
+      if (!q.endsWith('?')) return false;
+      
+      const genericPatterns = [
+        /^tell me more/i,
+        /^what happened/i,
+        /^can you tell/i,
+        /^do you remember/i
+      ];
+      if (genericPatterns.some(pattern => pattern.test(q) && q.length < 30)) return false;
+      
+      if (previousQuestions.some(pq => areQuestionsSimilar(q, pq))) return false;
+      
+      return true;
+    });
+  
+  return questions;
+};
+
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.API_KEY || '';
 const ai = new GoogleGenAI({ apiKey });
 
@@ -79,6 +127,82 @@ export const streamPersonaResponse = async function* (
     if (chunk.text) {
       yield chunk.text;
     }
+  }
+};
+
+// Generate follow-up questions using Gemini (alternative to OpenAI)
+export const generateFollowUpQuestionsGemini = async (
+  personaName: string,
+  lastResponse: string,
+  conversationHistory: Array<{role: string, content: string}>,
+  personaPersonality?: string,
+  personaBio?: string,
+  previousQuestions: string[] = []
+): Promise<string[]> => {
+  try {
+    // Build conversation context
+    const recentHistory = conversationHistory.slice(-6);
+    const historyContext = recentHistory.length > 2 
+      ? `\n\nPrevious conversation context:\n${recentHistory.map(m => `${m.role === 'user' ? 'Visitor' : personaName}: ${m.content.substring(0, 200)}`).join('\n\n')}`
+      : '';
+    
+    const personaContext = personaPersonality 
+      ? `\n\nAbout ${personaName}: ${personaPersonality.substring(0, 300)}`
+      : '';
+    
+    const bioContext = personaBio ? `\n\nBio: ${personaBio}` : '';
+    
+    const prompt = `You are generating follow-up questions for a conversation with ${personaName}${personaPersonality ? `, who is ${personaPersonality.substring(0, 200)}` : ''}. 
+
+Based on their last response, generate 5-7 natural, engaging follow-up questions that:
+1. Are SPECIFIC to what they just shared (reference names, places, events, details)
+2. Reference concrete details from their response
+3. Encourage deeper exploration of their experiences
+4. Match their communication style and generation
+5. Are open-ended to invite storytelling
+6. Avoid generic questions like "Tell me more" or "What happened next"
+
+Return ONLY the questions, one per line, without numbering, bullets, or prefixes.
+
+Based on this response from ${personaName}:\n\n"${lastResponse}"${personaContext}${bioContext}${historyContext}\n\nGenerate 5-7 follow-up questions that would naturally continue this conversation. Make them specific and reference details from their response.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        temperature: 0.8,
+        maxOutputTokens: 300,
+      }
+    });
+    
+    const questionsText = response.text || '';
+    const parsedQuestions = parseAndValidateQuestions(questionsText, previousQuestions);
+    const finalQuestions = parsedQuestions.slice(0, 5);
+    
+    if (finalQuestions.length < 3) {
+      const fallbackQuestions = [
+        'Tell me more about that experience',
+        'What happened next?',
+        'How did that make you feel?',
+        'Can you share another memory about that?',
+        'What did you learn from that experience?'
+      ].filter(q => !previousQuestions.some(pq => areQuestionsSimilar(q, pq)));
+      
+      return [...finalQuestions, ...fallbackQuestions].slice(0, 5);
+    }
+    
+    return finalQuestions;
+  } catch (error) {
+    console.error('Error generating follow-up questions with Gemini:', error);
+    const fallbackQuestions = [
+      'Tell me more about that experience',
+      'What happened next?',
+      'How did that make you feel?',
+      'Can you share another memory?',
+      'What did you learn from that experience?'
+    ].filter(q => !previousQuestions.some(pq => areQuestionsSimilar(q, pq)));
+    
+    return fallbackQuestions.slice(0, 5);
   }
 };
 

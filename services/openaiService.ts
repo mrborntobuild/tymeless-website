@@ -109,53 +109,161 @@ export const streamPersonaResponse = async function* (
   }
 };
 
+// Cache for follow-up questions to reduce API calls
+const questionCache = new Map<string, string[]>();
+
+// Helper function to check if questions are too similar
+const areQuestionsSimilar = (q1: string, q2: string): boolean => {
+  const normalize = (q: string) => q.toLowerCase().trim().replace(/[^\w\s]/g, '');
+  const n1 = normalize(q1);
+  const n2 = normalize(q2);
+  
+  // Check if one contains a significant portion of the other
+  if (n1.length < 10 || n2.length < 10) return false;
+  
+  const shorter = n1.length < n2.length ? n1 : n2;
+  const longer = n1.length < n2.length ? n2 : n1;
+  
+  // If shorter question is 70% contained in longer, consider similar
+  return longer.includes(shorter.substring(0, Math.max(10, shorter.length * 0.7)));
+};
+
+// Helper function to parse and validate questions
+const parseAndValidateQuestions = (questionsText: string, previousQuestions: string[] = []): string[] => {
+  // Split by various delimiters
+  const questions = questionsText
+    .split(/\n|;|•|[-*]/)
+    .map(q => q.trim())
+    .map(q => {
+      // Remove common prefixes
+      return q
+        .replace(/^(Q\d*[:.]?\s*)/i, '')
+        .replace(/^(Question\s*\d*[:.]?\s*)/i, '')
+        .replace(/^[-*•]\s*/, '')
+        .replace(/^\d+[\.\)]\s*/, '')
+        .trim();
+    })
+    .filter(q => {
+      // Validation: must be a question, have minimum length, not be generic
+      if (q.length < 10) return false;
+      if (q.length > 150) return false;
+      if (!q.endsWith('?')) return false;
+      
+      // Filter out generic questions
+      const genericPatterns = [
+        /^tell me more/i,
+        /^what happened/i,
+        /^can you tell/i,
+        /^do you remember/i
+      ];
+      if (genericPatterns.some(pattern => pattern.test(q) && q.length < 30)) return false;
+      
+      // Filter out duplicates from previous questions
+      if (previousQuestions.some(pq => areQuestionsSimilar(q, pq))) return false;
+      
+      return true;
+    });
+  
+  return questions;
+};
+
 // Generate follow-up questions based on AI response
 export const generateFollowUpQuestions = async (
   personaName: string,
   lastResponse: string,
-  conversationHistory: Array<{role: string, content: string}>
+  conversationHistory: Array<{role: string, content: string}>,
+  personaPersonality?: string,
+  personaBio?: string,
+  previousQuestions: string[] = []
 ): Promise<string[]> => {
   try {
+    // Create cache key from response (first 100 chars)
+    const cacheKey = lastResponse.substring(0, 100).toLowerCase().replace(/\s+/g, ' ');
+    if (questionCache.has(cacheKey) && previousQuestions.length === 0) {
+      return questionCache.get(cacheKey)!;
+    }
+    
+    // Build conversation context
+    const recentHistory = conversationHistory.slice(-6); // Last 6 messages
+    const historyContext = recentHistory.length > 2 
+      ? `\n\nPrevious conversation context:\n${recentHistory.map(m => `${m.role === 'user' ? 'Visitor' : personaName}: ${m.content.substring(0, 200)}`).join('\n\n')}`
+      : '';
+    
+    // Build persona context
+    const personaContext = personaPersonality 
+      ? `\n\nAbout ${personaName}: ${personaPersonality.substring(0, 300)}`
+      : '';
+    
+    const bioContext = personaBio ? `\n\nBio: ${personaBio}` : '';
+    
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         {
           role: 'system',
-          content: `You are generating follow-up questions for a conversation with ${personaName}, a World War II veteran nurse. Based on their last response, generate 5 natural, engaging follow-up questions that would help continue the conversation. Questions should be specific, relevant to what they just shared, and encourage them to elaborate on their experiences. Return only the questions, one per line, without numbering or bullets.`
+          content: `You are generating follow-up questions for a conversation with ${personaName}${personaPersonality ? `, who is ${personaPersonality.substring(0, 200)}` : ''}. 
+
+Based on their last response, generate 5-7 natural, engaging follow-up questions that:
+1. Are SPECIFIC to what they just shared (reference names, places, events, details)
+2. Reference concrete details from their response
+3. Encourage deeper exploration of their experiences
+4. Match their communication style and generation
+5. Are open-ended to invite storytelling
+6. Avoid generic questions like "Tell me more" or "What happened next"
+
+Return ONLY the questions, one per line, without numbering, bullets, or prefixes. Each question should be specific and reference details from their response.`
         },
         {
           role: 'user',
-          content: `Based on this response from ${personaName}:\n\n"${lastResponse}"\n\nGenerate 5 follow-up questions that would naturally continue this conversation.`
+          content: `Based on this response from ${personaName}:\n\n"${lastResponse}"${personaContext}${bioContext}${historyContext}\n\nGenerate 5-7 follow-up questions that would naturally continue this conversation. Make them specific and reference details from their response.`
         }
       ],
       temperature: 0.8,
-      max_tokens: 200,
+      max_tokens: 300, // Increased for better questions
     });
     
     const questionsText = response.choices[0]?.message?.content || '';
-    const questions = questionsText
-      .split('\n')
-      .map(q => q.trim())
-      .filter(q => q.length > 0 && !q.match(/^\d+[\.\)]/)) // Remove numbering
-      .slice(0, 5);
+    const parsedQuestions = parseAndValidateQuestions(questionsText, previousQuestions);
     
-    return questions.length > 0 ? questions : [
-      'Tell me more about that',
-      'What happened next?',
-      'How did that make you feel?',
-      'Can you share another memory?',
-      'What did you learn from that experience?'
-    ];
+    // Take top 5 questions
+    const finalQuestions = parsedQuestions.slice(0, 5);
+    
+    // If we have enough good questions, cache them
+    if (finalQuestions.length >= 3 && previousQuestions.length === 0) {
+      questionCache.set(cacheKey, finalQuestions);
+      // Limit cache size
+      if (questionCache.size > 50) {
+        const firstKey = questionCache.keys().next().value;
+        questionCache.delete(firstKey);
+      }
+    }
+    
+    // Fallback if we don't have enough questions
+    if (finalQuestions.length < 3) {
+      const fallbackQuestions = [
+        'Tell me more about that experience',
+        'What happened next?',
+        'How did that make you feel?',
+        'Can you share another memory about that?',
+        'What did you learn from that experience?'
+      ].filter(q => !previousQuestions.some(pq => areQuestionsSimilar(q, pq)));
+      
+      return [...finalQuestions, ...fallbackQuestions].slice(0, 5);
+    }
+    
+    return finalQuestions;
   } catch (error) {
     console.error('Error generating follow-up questions:', error);
     // Fallback questions
-    return [
-      'Tell me more about that',
+    const fallbackQuestions = [
+      'Tell me more about that experience',
       'What happened next?',
       'How did that make you feel?',
       'Can you share another memory?',
       'What did you learn from that experience?'
-    ];
+    ].filter(q => !previousQuestions.some(pq => areQuestionsSimilar(q, pq)));
+    
+    return fallbackQuestions.slice(0, 5);
   }
 };
 

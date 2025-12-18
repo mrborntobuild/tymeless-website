@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { LegacyPersona } from './types';
 import LegacyCard from './components/LegacyCard';
 import ChatInterface from './components/ChatInterface';
@@ -11,6 +11,7 @@ import AuthPage from './components/AuthPage';
 import Dashboard from './components/Dashboard';
 import Logo from './components/Logo';
 import { Search, Plus, PlayCircle, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { getPersonas } from './services/database/personaService';
 
 // Mock Data to populate the carousel initially
 const INITIAL_PERSONAS: LegacyPersona[] = [
@@ -22,37 +23,61 @@ const INITIAL_PERSONAS: LegacyPersona[] = [
     imageUrl: 'https://vxsjiwlvradiyluppage.supabase.co/storage/v1/object/public/Test/0af4c4ed17babcbd2fc6d46643b0596d_1765938025_sev6ffta.png',
     bio: "The matriarch of the Lewis family. Known for her award-winning roses and her stories about the War.",
     personality: "I am a gentle, wise grandmother born in 1940. I love gardening and baking. I speak softly and use endearments like 'dear' and 'honey'. I value family above all else.",
-    sampleQuestions: ["How do I prune hydrangeas?", "Tell me about meeting Grandpa."]
+    sampleQuestions: [
+      "Tell me about growing up on the farm",
+      "What was it like during the Great Depression?",
+      "How did your grandmother inspire you to become a nurse?",
+      "Tell me about your time as a war nurse",
+      "What was D-Day like?"
+    ]
   },
   {
     id: '2',
     name: 'Robert Chen',
     relation: 'Father',
-    age: 'Age 62',
+    age: 'Age 72',
     imageUrl: 'https://vxsjiwlvradiyluppage.supabase.co/storage/v1/object/public/Test/1765938473645-qbrz4rke0en.png',
-    bio: "Architect and jazz enthusiast. He could fix anything and always had a joke ready.",
-    personality: "I am a dad who loves dad jokes, jazz music, and architecture. I am practical, stoic but warm, and always encouraging.",
-    sampleQuestions: ["What's the best jazz album?", "How do I fix a leaky faucet?"]
+    bio: "Architect and jazz enthusiast. He could fix anything and always had a joke ready. A master craftsman who built homes and communities.",
+    personality: "I am a retired architect who loves jazz music, practical problem-solving, and architecture. I am practical, stoic but warm, and always encouraging. I speak with the wisdom of someone who has designed buildings and seen cities grow. I share knowledge from my actual experiences, referencing specific projects, jazz performances, and life lessons.",
+    sampleQuestions: [
+      "Tell me about your favorite architectural project",
+      "What is the best jazz album you ever heard?",
+      "How did you get into architecture?",
+      "Tell me about a building you designed that you are most proud of",
+      "What advice do you have for young architects?"
+    ]
   },
   {
     id: '3',
-    name: 'Sarah Jenkins',
-    relation: 'Sister',
-    age: 'Age 45',
+    name: 'Samuel Jenkins',
+    relation: 'Brother',
+    age: 'Age 75',
     imageUrl: 'https://vxsjiwlvradiyluppage.supabase.co/storage/v1/object/public/Test/ed84cd4e51878ecc68e6026de294e481_1765939363_tu22byji.png',
-    bio: "A free spirit who traveled the world. Her journals are preserved here forever.",
-    personality: "I am adventurous, energetic, and optimistic. I love travel and art. I speak quickly and enthusiastically.",
-    sampleQuestions: ["Where should I travel next?", "Tell me about your time in Peru."]
+    bio: "A free spirit who traveled the world. His journals and adventures are preserved here forever. A storyteller who lived life to the fullest.",
+    personality: "I am adventurous, energetic, and optimistic. I love travel, art, and meeting people from different cultures. I speak quickly and enthusiastically, sharing vivid stories from my journeys. I share knowledge from my actual experiences, referencing specific places, people, and adventures from my travels around the world.",
+    sampleQuestions: [
+      "Tell me about your most memorable travel experience",
+      "Where was your favorite place you visited?",
+      "What was it like traveling in the 1970s?",
+      "Tell me about a person you met during your travels who changed your perspective",
+      "What advice do you have for someone who wants to see the world?"
+    ]
   },
   {
     id: '4',
-    name: 'Arthur P. Wright',
-    relation: 'Great Grandfather',
+    name: 'Agnes P. Wright',
+    relation: 'Great Grandmother',
     age: 'Age 98',
     imageUrl: 'https://vxsjiwlvradiyluppage.supabase.co/storage/v1/object/public/Test/cbea1ddef943f99fe2797542a1511ebc_1765939725485.png',
-    bio: "A glimpse into the 1920s. Preserved from old letters and audio recordings.",
-    personality: "I am formal, old-fashioned, and polite. I use vocabulary from the early 20th century. I talk about history and honor.",
-    sampleQuestions: ["What was life like in the 20s?", "Advice for a young man?"]
+    bio: "A glimpse into the 1920s. Preserved from old letters and audio recordings. A woman of grace, wisdom, and old-world charm.",
+    personality: "I am formal, old-fashioned, and polite. I use vocabulary from the early 20th century. I talk about history, honor, and the values that shaped my generation. I speak with the dignity and wisdom of someone who has lived through nearly a century of change. I share knowledge from my actual experiences, referencing specific events, people, and lessons from the 1920s through today.",
+    sampleQuestions: [
+      "What was life like in the 1920s?",
+      "Tell me about your family growing up",
+      "What was the most significant change you witnessed in your lifetime?",
+      "What advice do you have for a young person today?",
+      "Tell me about a historical event you lived through"
+    ]
   }
 ];
 
@@ -64,6 +89,38 @@ const App: React.FC = () => {
   const [isPreserving, setIsPreserving] = useState(false);
   const [isVideoOpen, setIsVideoOpen] = useState(false);
   const [personas, setPersonas] = useState<LegacyPersona[]>(INITIAL_PERSONAS);
+
+  // Load personas from database on mount
+  useEffect(() => {
+    const loadPersonas = async () => {
+      try {
+        const dbPersonas = await getPersonas();
+        if (dbPersonas.length > 0) {
+          // Use DB personas only, filter out duplicates by name
+          const uniquePersonas = dbPersonas.reduce((acc: LegacyPersona[], persona) => {
+            // Check if we already have this person by name
+            if (!acc.find(p => p.name.toLowerCase() === persona.name.toLowerCase())) {
+              acc.push(persona);
+            }
+            return acc;
+          }, []);
+          
+          // Add fallback personas only if they don't exist in DB (by name)
+          const dbPersonaNames = new Set(uniquePersonas.map(p => p.name.toLowerCase()));
+          const fallbackPersonas = INITIAL_PERSONAS.filter(
+            p => !dbPersonaNames.has(p.name.toLowerCase())
+          );
+          
+          setPersonas([...uniquePersonas, ...fallbackPersonas]);
+        }
+        // If DB returns empty, keep using INITIAL_PERSONAS
+      } catch (error) {
+        console.error('Error loading personas from database:', error);
+        // On error, keep using INITIAL_PERSONAS as fallback
+      }
+    };
+    loadPersonas();
+  }, []);
 
   const handleCreateNew = (newPersona: LegacyPersona) => {
     setPersonas([newPersona, ...personas]);
